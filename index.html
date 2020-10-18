@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Excel Circularity Visualizer</title>
+    <link href="https://unpkg.com/tailwindcss@^1.0/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .node rect {
+            stroke: #999;
+            fill: #fff;
+            stroke-width: 1.5px;
+        }
+
+        .edgePath path {
+            stroke: #333;
+            stroke-width: 1.5px;
+        }
+    </style>
+</head>
+
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cash/8.1.0/cash.min.js"></script>
+    <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <script>
+        function main() {
+            let textInput = $("#exl-in")
+            textInput.val("");
+
+            let inputValue = undefined;
+
+            textInput.on("input", (e) => {
+                var raw = e.target.value;
+                inputValue = raw.trim().replace(/\r?\\n/g, "\n");
+                textInput.val(inputValue)
+                updateGraph(inputValue)
+            })
+
+
+        }
+
+        function updateGraph(input) {
+            let g = new dagreD3.graphlib.Graph()
+                .setGraph({})
+                .setDefaultEdgeLabel(function () { return {}; });
+
+            let svgElement = $("#graph")[0]
+            svgElement.innerHTML = '';
+
+            let out = input.split("\n").flatMap((el) => {
+                let split = el.split(",");
+                if (split.length === 3) {
+                    return [split]
+                } else {
+                    return []
+                }
+            })
+
+            let nodes = new Map()
+            out.forEach(element => {
+                let inNode = element[0]
+                let outNode = element[1]
+                let depth = element[2]
+
+                if (!nodes.has(inNode)) {
+                    let idx = nodes.size
+                    nodes.set(inNode, idx)
+                    g.setNode(idx, { label: inNode })
+                }
+
+                if (!nodes.has(outNode)) {
+                    let idx = nodes.size
+                    nodes.set(outNode, idx)
+                    g.setNode(idx, { label: outNode })
+                }
+
+                g.setEdge(nodes.get(inNode), nodes.get(outNode))
+            });
+
+            let render = new dagreD3.render();
+            let svg = d3.select("svg");
+            let svgGroup = svg.append("g");
+
+            render(d3.select("svg g"), g);
+
+            let height = $("#graph > g")[0].getBoundingClientRect().height
+            svgElement.setAttribute("height", height)
+
+
+
+            console.log(out)
+        }
+
+        $(main);
+    </script>
+    <div class="container mx-auto">
+        <h1 class="text-4xl font-bold mb-5 mt-5">Excel Circularity Visualizer</h1>
+        <div class="mb-5">
+            <textarea id="exl-in" placeholder="Paste the contents here" type="text"
+                class="w-full rounded border border-gray-400 p-4" rows="7">
+            </textarea>
+        </div>
+        <div>
+            <svg id="graph" class="h-auto w-full"></svg>
+        </div>
+        <div class="mt-5">
+            <h3 class="text-lg font-light">Macro</h3>
+            <pre>
+Sub adjgraph()
+    Dim current As Range
+    Dim csvOut As String
+    Dim visited As Object
+    
+    Dim MSForms_DataObject As Object
+    
+    Set current = Application.ActiveCell
+    Set visited = CreateObject("Scripting.Dictionary")
+    
+    Set MSForms_DataObject = CreateObject("new:{1C3B4210-F441-11CE-B9EA-00AA006B1A69}")
+ 
+    MSForms_DataObject.setText InnerRecur(current, visited, 0)
+    MSForms_DataObject.PutInClipboard
+    
+    MsgBox "Copied to clipboard!"
+    
+    Set MSForms_DataObject = Nothing
+
+End Sub
+
+Private Function InnerRecur(ByRef rng As Range, ByRef visitedDic As Object, ByVal depth As Long) As String
+    Dim currentPrecedents As Object
+    Dim returnVal As String
+    Dim nextPrec As Range
+    Dim currentAddress As String
+    Dim nextPrecAddress As String
+    
+    returnVal = ""
+    currentAddress = rng.Address(False, False, xlA1, True)
+    
+    Set currentPrecedents = GetAllPrecedents(rng)
+    
+    If currentPrecedents.Count = 0 Then
+        returnVal = ""
+    End If
+    
+    For i = LBound(currentPrecedents.Keys) To UBound(currentPrecedents.Keys)
+        Set nextPrec = currentPrecedents.Items()(i)
+        nextPrecAddress = nextPrec.Address(False, False, xlA1, True)
+        returnVal = returnVal & currentAddress & "," & nextPrecAddress & "," & depth & "\n"
+        If Not visitedDic.Exists(nextPrecAddress) Then
+            visitedDic.Add nextPrecAddress, 0
+            returnVal = returnVal & InnerRecur(nextPrec, visitedDic, depth + 1)
+        End If
+    Next i
+    
+    InnerRecur = returnVal
+End Function
+
+'won't navigate through precedents in closed workbooks
+'won't navigate through precedents in protected worksheets
+'won't identify precedents on hidden sheets
+Public Function GetAllPrecedents(ByRef rngToCheck As Range) As Object
+ 
+    Const lngTOP_LEVEL As Long = 1
+    Dim dicAllPrecedents As Object
+    Dim strKey As String
+ 
+    Set dicAllPrecedents = CreateObject("Scripting.Dictionary")
+ 
+    Application.ScreenUpdating = False
+ 
+    GetPrecedents rngToCheck, dicAllPrecedents, lngTOP_LEVEL
+    Set GetAllPrecedents = dicAllPrecedents
+ 
+    Application.ScreenUpdating = True
+ 
+End Function
+ 
+Private Sub GetPrecedents(ByRef rngToCheck As Range, ByRef dicAllPrecedents As Object, ByVal lngLevel As Long)
+ 
+    Dim rngCell As Range
+    Dim rngFormulas As Range
+ 
+    If Not rngToCheck.Worksheet.ProtectContents Then
+        If rngToCheck.Cells.CountLarge > 1 Then   'Change to .Count in XL 2003 or earlier
+            On Error Resume Next
+            Set rngFormulas = rngToCheck.SpecialCells(xlCellTypeFormulas)
+            On Error GoTo 0
+        Else
+            If rngToCheck.HasFormula Then Set rngFormulas = rngToCheck
+        End If
+ 
+        If Not rngFormulas Is Nothing Then
+            For Each rngCell In rngFormulas.Cells
+                GetCellPrecedents rngCell, dicAllPrecedents, lngLevel
+            Next rngCell
+            rngFormulas.Worksheet.ClearArrows
+        End If
+    End If
+ 
+End Sub
+ 
+Private Sub GetCellPrecedents(ByRef rngCell As Range, ByRef dicAllPrecedents As Object, ByVal lngLevel As Long)
+ 
+    Dim lngArrow As Long
+    Dim lngLink As Long
+    Dim blnNewArrow As Boolean
+    Dim strPrecedentAddress As String
+    Dim rngPrecedentRange As Range
+ 
+    Do
+        lngArrow = lngArrow + 1
+        blnNewArrow = True
+        lngLink = 0
+ 
+        Do
+            lngLink = lngLink + 1
+ 
+            rngCell.ShowPrecedents
+ 
+            On Error Resume Next
+            Set rngPrecedentRange = rngCell.NavigateArrow(True, lngArrow, lngLink)
+ 
+            If Err.Number <> 0 Then
+                Exit Do
+            End If
+ 
+            On Error GoTo 0
+            strPrecedentAddress = rngPrecedentRange.Address(False, False, xlA1, True)
+ 
+            If strPrecedentAddress = rngCell.Address(False, False, xlA1, True) Then
+                Exit Do
+            Else
+ 
+                blnNewArrow = False
+ 
+                If Not dicAllPrecedents.Exists(strPrecedentAddress) Then
+                    dicAllPrecedents.Add strPrecedentAddress, rngPrecedentRange
+                    'GetPrecedents rngPrecedentRange, dicAllPrecedents, lngLevel + 1
+                End If
+            End If
+        Loop
+ 
+        If blnNewArrow Then Exit Do
+    Loop
+ 
+End Sub
+            </pre>
+        </div>
+    </div>
+</body>
+
+</html>
